@@ -373,6 +373,49 @@
         }
 
         .btn-delete:hover { background: #dc2626; }
+
+        .file-item {
+            padding: 25px;
+            border-bottom: 1px solid var(--gray-light);
+        }
+
+        .file-item:last-child { border-bottom: none; }
+
+        .file-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .file-name {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--dark);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .file-time {
+            color: var(--gray);
+            font-size: 0.85rem;
+        }
+
+        .file-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 15px;
+            color: var(--gray);
+            font-size: 0.9rem;
+        }
+
+        .file-meta span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
     </style>
 </head>
 <body>
@@ -419,6 +462,10 @@
                     <div class="stat-number" id="totalAccounts">0</div>
                     <div class="stat-label">注册用户</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="totalFiles">0</div>
+                    <div class="stat-label">网盘文件</div>
+                </div>
             </div>
 
             <div class="tabs-container">
@@ -428,6 +475,9 @@
                     </button>
                     <button class="tab-btn" data-tab="accounts">
                         <i class="fas fa-users"></i> 账户管理
+                    </button>
+                    <button class="tab-btn" data-tab="files">
+                        <i class="fas fa-folder-open"></i> 文件管理
                     </button>
                     <button class="refresh-btn" id="refreshBtn">
                         <i class="fas fa-sync-alt"></i> 刷新
@@ -455,6 +505,17 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="tab-content" id="filesTab">
+                    <div class="feedback-status" id="filesStatus"></div>
+                    <div id="fileContainer">
+                        <div class="empty-state">
+                            <i class="fas fa-folder-open"></i>
+                            <h3>暂无文件</h3>
+                            <p>网盘文件将显示在这里</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -466,11 +527,14 @@
         const GITHUB_REPO = "dyz131005.github.io";
         const ACCOUNTS_FILE = "accounts.yaml";
         const MESSAGES_FILE = "messages.yaml";
+        const DRIVE_REPO = "drive";
+        const DRIVE_FILES_FILE = "files.yaml";
 
         console.log("🔐 管理员密码: " + ADMIN_PASSWORD);
 
         let accountsData = {};
         let messagesData = [];
+        let filesData = [];
 
         function decodeApiKey() {
             try {
@@ -482,11 +546,11 @@
             } catch (e) { return null; }
         }
 
-        async function fetchYamlFile(filename) {
+        async function fetchYamlFile(filename, repo = GITHUB_REPO) {
             const apiKey = decodeApiKey();
             if (!apiKey) throw new Error("API Key解码失败");
 
-            const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${filename}`;
+            const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${repo}/contents/${filename}`;
             const response = await fetch(url, {
                 headers: {
                     'Authorization': `token ${apiKey}`,
@@ -500,11 +564,11 @@
             return await response.text();
         }
 
-        async function saveYamlFile(filename, content, message = "更新文件") {
+        async function saveYamlFile(filename, content, message = "更新文件", repo = GITHUB_REPO) {
             const apiKey = decodeApiKey();
             if (!apiKey) throw new Error("API Key解码失败");
 
-            const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/contents/${filename}`;
+            const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${repo}/contents/${filename}`;
             
             let sha = null;
             const jsonResponse = await fetch(url, {
@@ -553,9 +617,13 @@
                 const messagesContent = await fetchYamlFile(MESSAGES_FILE);
                 messagesData = messagesContent ? jsyaml.load(messagesContent) || [] : [];
 
+                const filesContent = await fetchYamlFile(DRIVE_FILES_FILE, DRIVE_REPO);
+                filesData = filesContent ? jsyaml.load(filesContent) || [] : [];
+
                 updateStats();
                 renderMessages();
                 renderAccounts();
+                renderFiles();
             } catch (error) {
                 console.error("加载数据失败:", error);
                 showFeedbackStatus('messagesStatus', '加载数据失败: ' + error.message, 'error');
@@ -569,11 +637,13 @@
             const repliedMessages = messagesData.filter(m => m.replies && m.replies.length > 0).length;
             const pendingMessages = totalMessages - repliedMessages;
             const totalAccounts = Object.keys(accountsData).length;
+            const totalFiles = filesData.length;
 
             document.getElementById('totalMessages').textContent = totalMessages;
             document.getElementById('repliedMessages').textContent = repliedMessages;
             document.getElementById('pendingMessages').textContent = pendingMessages;
             document.getElementById('totalAccounts').textContent = totalAccounts;
+            document.getElementById('totalFiles').textContent = totalFiles;
         }
 
         function renderMessages() {
@@ -687,6 +757,120 @@
             });
 
             container.innerHTML = html;
+        }
+
+        function renderFiles() {
+            const container = document.getElementById('fileContainer');
+            if (!filesData.length) {
+                container.innerHTML = '<div class="empty-state"><i class="fas fa-folder-open"></i><h3>暂无文件</h3><p>网盘文件将显示在这里</p></div>';
+                return;
+            }
+
+            const sortedFiles = [...filesData].sort((a, b) => 
+                new Date(b.createdAt) - new Date(a.createdAt)
+            );
+
+            let html = '';
+            sortedFiles.forEach(file => {
+                html += `
+                    <div class="file-item" data-id="${file.id}">
+                        <div class="file-header">
+                            <div class="file-name">
+                                <i class="fas fa-file"></i>
+                                ${escapeHtml(file.fileName)}
+                            </div>
+                            <div class="file-time">上传于 ${formatTime(file.createdAt)}</div>
+                        </div>
+                        <div class="file-meta">
+                            <span><i class="fas fa-user"></i> ${escapeHtml(file.username)}</span>
+                            <span><i class="fas fa-tag"></i> v${file.version}</span>
+                            <span><i class="fas fa-file-size"></i> ${formatFileSize(file.size)}</span>
+                            <span><i class="fas fa-layer-group"></i> ${file.totalChunks || 1} 个分片</span>
+                        </div>
+                        <button class="btn-delete" onclick="deleteFile('${file.id}')">
+                            <i class="fas fa-trash"></i> 删除此文件
+                        </button>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        async function deleteFile(fileId) {
+            if (!confirm('确定要删除这个文件吗？此操作不可撤销。')) return;
+
+            showLoading(true);
+            try {
+                const fileIndex = filesData.findIndex(f => f.id === parseInt(fileId));
+                if (fileIndex === -1) {
+                    throw new Error('找不到此文件');
+                }
+
+                const file = filesData[fileIndex];
+                const apiKey = decodeApiKey();
+                if (!apiKey) throw new Error("API Key解码失败");
+
+                const baseName = file.fileName.replace(/\.[^/.]+$/, '');
+                const totalChunks = file.totalChunks || 1;
+                
+                for (let i = 0; i < totalChunks; i++) {
+                    let filePath;
+                    if (totalChunks === 1) {
+                        filePath = `files/v${file.version}_${baseName}.bin`;
+                    } else {
+                        filePath = `files/v${file.version}_${baseName}_chunk${i}.bin`;
+                    }
+                    
+                    const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${DRIVE_REPO}/contents/${filePath}`;
+                    
+                    const getResponse = await fetch(url, {
+                        headers: {
+                            'Authorization': `token ${apiKey}`,
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    });
+                    
+                    if (getResponse.ok) {
+                        const data = await getResponse.json();
+                        const deleteResponse = await fetch(url, {
+                            method: 'DELETE',
+                            headers: {
+                                'Authorization': `token ${apiKey}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                message: `管理员删除文件: ${file.fileName}`,
+                                sha: data.sha
+                            })
+                        });
+                        
+                        if (!deleteResponse.ok) {
+                            console.warn(`删除分片 ${i} 失败: ${deleteResponse.status}`);
+                        }
+                    }
+                }
+
+                filesData.splice(fileIndex, 1);
+                const yamlContent = jsyaml.dump(filesData);
+                await saveYamlFile(DRIVE_FILES_FILE, yamlContent, `管理员删除文件`, DRIVE_REPO);
+
+                showFeedbackStatus('filesStatus', '删除成功！', 'success');
+                await loadData();
+            } catch (error) {
+                console.error('删除失败:', error);
+                showFeedbackStatus('filesStatus', '删除失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function formatFileSize(bytes) {
+            if (!bytes) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
         async function submitReply(messageId) {
